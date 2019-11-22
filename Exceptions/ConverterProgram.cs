@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Xml;
 using System.Xml.Serialization;
 using NLog;
 
@@ -33,14 +34,26 @@ namespace Exceptions
             var tasks = filenames
                 .Select(fn => Task.Run(() => ConvertFile(fn, settings))) 
                 .ToArray();
-            Task.WaitAll(tasks); 
+            Task.WaitAll(tasks);
         }
 
         private static Settings LoadSettings() 
         {
             var serializer = new XmlSerializer(typeof(Settings));
-            var content = File.ReadAllText("settings.xml");
-            return (Settings) serializer.Deserialize(new StringReader(content));
+            try
+            {
+                var content = File.ReadAllText("settings.xml");
+                return (Settings) serializer.Deserialize(new StringReader(content));
+            }
+            catch (FileNotFoundException e)
+            {
+                log.Error("Файл настроек .* отсутствует.");
+                return Settings.Default;
+            }
+            catch (Exception e)
+            {
+                throw new XmlException("Не удалось прочитать файл настроек");
+            }
         }
 
         private static void ConvertFile(string filename, Settings settings)
@@ -61,10 +74,24 @@ namespace Exceptions
                 log.Error($"File {filename} not found"); 
                 return;
             }
-            var convertedLines = lines
-                .Select(ConvertLine)
-                .Select(s => s.Length + " " + s);
-            File.WriteAllLines(filename + ".out", convertedLines);
+
+            try
+            {
+                var convertedLines = lines
+                    .Select(ConvertLine)
+                    .Select(s => s.Length + " " + s);
+                File.WriteAllLines(filename + ".out", convertedLines);
+            }
+            catch (FileNotFoundException e)
+            {
+                log.Error($"Не удалось сконвертировать {filename}" + e);
+            }
+            catch (Exception e)
+            {
+                log.Error("Некорректная строка");
+            }
+            
+            
         }
 
         private static IEnumerable<string> PrepareLines(string filename)
@@ -79,24 +106,15 @@ namespace Exceptions
             yield return lineIndex.ToString();
         }
 
-        public static string ConvertLine(string arg) 
-        {                                                
-            try
-            {
-                return ConvertAsDateTime(arg);
-            }
-            catch
-            {
-                try
-                {
-                    return ConvertAsDouble(arg);
-                }
-                catch
-                {
-                    return ConvertAsCharIndexInstruction(arg);
-                }
-            }
+        public static string ConvertLine(string arg)
+        {
+            if (DateTime.TryParse(arg, out var dateTime))
+                return dateTime.ToString(CultureInfo.InvariantCulture);
+            if (double.TryParse(arg, out var d))
+                return d.ToString(CultureInfo.InvariantCulture);
+            return ConvertAsCharIndexInstruction(arg);
         }
+
 
         private static string ConvertAsCharIndexInstruction(string s)
         {
@@ -109,14 +127,14 @@ namespace Exceptions
             return text[charIndex].ToString();
         }
 
-        private static string ConvertAsDateTime(string arg)
-        {
-            return DateTime.Parse(arg).ToString(CultureInfo.InvariantCulture);
-        }
-
-        private static string ConvertAsDouble(string arg)
-        {
-            return double.Parse(arg).ToString(CultureInfo.InvariantCulture);
-        }
+//        private static string ConvertAsDateTime(string arg)
+//        {
+//            return DateTime.Parse(arg).ToString(CultureInfo.InvariantCulture);
+//        }
+//
+//        private static string ConvertAsDouble(string arg)
+//        {
+//            return double.Parse(arg).ToString(CultureInfo.InvariantCulture);
+//        }
     }
 }
